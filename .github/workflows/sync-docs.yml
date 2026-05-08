@@ -1,0 +1,73 @@
+name: Sync Docs Fallback
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [sync-docs]
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fallback repo
+        uses: actions/checkout@v4
+        with:
+          path: fallback
+
+      - name: Checkout mcujs source
+        uses: actions/checkout@v4
+        with:
+          repository: mcu-js/mcujs
+          ref: main
+          path: source
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: source/docs/package-lock.json
+
+      - name: Build docs
+        working-directory: source/docs
+        run: |
+          npm ci
+          npm run build
+
+      - name: Replace fallback static output
+        run: |
+          rsync -a --delete \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            source/docs/build/ fallback/
+          touch fallback/.nojekyll
+
+      - name: Preserve fallback README
+        working-directory: fallback
+        run: |
+          cat > README.md <<'EOF'
+          # mcujs Pages Fallback
+
+          This repository publishes a temporary GitHub Pages mirror for mcujs docs at
+          `https://mcu-js.github.io/`.
+
+          The canonical site is `https://mcujs.org/`. This fallback exists so the public
+          docs remain reachable while DNS and HTTPS are being cut over for `mcujs.org`
+          and `mcujs.com`.
+          EOF
+
+      - name: Commit refreshed fallback
+        working-directory: fallback
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -z "$(git status --short)" ]; then
+            echo "Fallback docs are already current."
+            exit 0
+          fi
+          git add -A
+          git commit -m "Sync docs fallback"
+          git push
